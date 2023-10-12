@@ -52,6 +52,20 @@ import /* fdsa */ d/* asdf */.* // w
 		pkg:      "x",
 		imports:  []string{"a", "c", "d"},
 	},
+	{
+		desc: "value class",
+		kt: `
+import a.b.C
+import c.d.E as EEE
+
+// Maybe xyz.numbers should be an import?
+@JvmInline
+value class Energy(val kwh: xyz.numbers.Double) { fun thing(): Unit {}}
+	`,
+		filename: "simple.kt",
+		pkg:      "",
+		imports:  []string{"a.b", "c.d"},
+	},
 }
 
 func TestTreesitterParser(t *testing.T) {
