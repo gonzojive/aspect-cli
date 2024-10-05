@@ -34,7 +34,7 @@ func importStatementComparator(a, b interface{}) int {
 //
 // [identifiers]: https://docs.oracle.com/javase/specs/jls/se23/html/jls-3.html#jls-Identifier
 type javaFullyQualifiedName struct {
-	// Each component of the path is an identifier.
+	// Each component of the path is an identifier as specified here:
 	// https://kotlinlang.org/spec/syntax-and-grammar.html#grammar-rule-importList.
 	//
 	// A Java identifier that should mostly correspond to [3.8. Identifiers] from
