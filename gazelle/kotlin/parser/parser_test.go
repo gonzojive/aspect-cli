@@ -2,20 +2,25 @@ package parser
 
 import (
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 )
 
 var testCases = []struct {
 	desc, kt string
 	filename string
-	pkg      string
-	imports  []string
+	want     *ParseResult
 }{
 	{
 		desc:     "empty",
 		kt:       "",
 		filename: "empty.kt",
-		pkg:      "",
-		imports:  []string{},
+		want: &ParseResult{
+			File:    "empty.kt",
+			Package: "",
+			Imports: []string{},
+		},
 	},
 	{
 		desc: "simple",
@@ -24,8 +29,11 @@ import a.B
 import c.D as E
 	`,
 		filename: "simple.kt",
-		pkg:      "",
-		imports:  []string{"a", "c"},
+		want: &ParseResult{
+			File:    "simple.kt",
+			Package: "",
+			Imports: []string{"a", "c"},
+		},
 	},
 	{
 		desc: "stars",
@@ -34,8 +42,11 @@ import c.D as E
 import  d.y.* 
 		`,
 		filename: "stars.kt",
-		pkg:      "a.b.c",
-		imports:  []string{"d.y"},
+		want: &ParseResult{
+			File:    "stars.kt",
+			Package: "a.b.c",
+			Imports: []string{"d.y"},
+		},
 	},
 	{
 		desc: "comments",
@@ -49,8 +60,11 @@ import a.B // y
 import /* fdsa */ d/* asdf */.* // w
 				`,
 		filename: "comments.kt",
-		pkg:      "x",
-		imports:  []string{"a", "c", "d"},
+		want: &ParseResult{
+			File:    "comments.kt",
+			Package: "x",
+			Imports: []string{"a", "c", "d"},
+		},
 	},
 	{
 		desc: "value class",
@@ -63,8 +77,30 @@ import c.d.E as EEE
 value class Energy(val kwh: xyz.numbers.Double) { fun thing(): Unit {}}
 	`,
 		filename: "simple.kt",
-		pkg:      "",
-		imports:  []string{"a.b", "c.d"},
+		want: &ParseResult{
+			File:    "simple.kt",
+			Package: "",
+			Imports: []string{"a.b", "c.d"},
+		},
+	},
+	{
+		desc: "companion object main",
+		kt: `
+package foo
+
+class MyClass {
+	companion object {
+		fun main() = TODO("write me")
+	}
+}
+	`,
+		filename: "simple.kt",
+		want: &ParseResult{
+			File:    "simple.kt",
+			Package: "foo",
+			Imports: []string{},
+			HasMain: true,
+		},
 	},
 }
 
@@ -74,12 +110,8 @@ func TestTreesitterParser(t *testing.T) {
 		t.Run(tc.desc, func(t *testing.T) {
 			res, _ := NewParser().Parse(tc.filename, tc.kt)
 
-			if !equal(res.Imports, tc.imports) {
-				t.Errorf("Imports...\nactual:  %#v;\nexpected: %#v\nkotlin code:\n%v", res.Imports, tc.imports, tc.kt)
-			}
-
-			if res.Package != tc.pkg {
-				t.Errorf("Package....\nactual:  %#v;\nexpected: %#v\nkotlin code:\n%v", res.Package, tc.pkg, tc.kt)
+			if diff := cmp.Diff(tc.want, res, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("unexpected diff (-want, +got):\n%s", diff)
 			}
 		})
 	}
