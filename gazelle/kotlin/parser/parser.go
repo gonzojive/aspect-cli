@@ -77,6 +77,20 @@ func (i *ImportStatement) Alias() *SimpleIdentiifer {
 	return i.alias
 }
 
+// Alias returns the import alias, if the import contains an [importAlias], or nil if not.
+//
+// [importAlias]: https://kotlinlang.org/spec/syntax-and-grammar.html#grammar-rule-importAlias
+func (i *ImportStatement) String() string {
+	switch {
+	case i.Alias() != nil:
+		return i.Identifier().Literal() + " as " + i.Alias().Literal()
+	case i.IsStarImport():
+		return i.Identifier().Literal() + ".*"
+	default:
+		return i.Identifier().Literal()
+	}
+}
+
 // Identifiers is a parsed [Kotlin identifier]. Identifiers are used in
 // import statements and elsewhere in Kotlin source code.
 //

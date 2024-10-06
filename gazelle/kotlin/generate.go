@@ -2,6 +2,8 @@ package gazelle
 
 import (
 	"fmt"
+	"iter"
+	"maps"
 	"math"
 	"os"
 	"path"
@@ -55,19 +57,22 @@ func (kt *kotlinLang) GenerateRules(args language.GenerateArgs) language.Generat
 
 			target = &binTarget.KotlinTarget
 		} else {
-			libTarget.Files.Add(p.File)
-			libTarget.Packages.Add(p.Package)
+			libTarget.addFile(p.File)
+			if p.Package != nil {
+				libTarget.addPackage(p.Package)
+			}
 
 			target = &libTarget.KotlinTarget
 		}
 
 		for _, impt := range p.Imports {
-			target.Imports.Add(ImportStatement{
+			target.addImport(&ImportStatement{
 				ImportSpec: resolve.ImportSpec{
 					Lang: LanguageName,
-					Imp:  impt,
+					Imp:  impt.Identifier().Literal(),
 				},
-				SourcePath: p.File,
+				SourcePath:   p.File,
+				ImportHeader: impt,
 			})
 		}
 	}
@@ -99,7 +104,7 @@ func (kt *kotlinLang) addLibraryRule(targetName string, target *KotlinLibTarget,
 	}
 
 	// Generate nothing if there are no source files. Remove any existing rules.
-	if target.Files.Empty() {
+	if len(target.Files) == 0 {
 		if args.File == nil {
 			return nil
 		}
@@ -116,7 +121,7 @@ func (kt *kotlinLang) addLibraryRule(targetName string, target *KotlinLibTarget,
 	}
 
 	ktLibrary := rule.NewRule(KtJvmLibrary, targetName)
-	ktLibrary.SetAttr("srcs", target.Files.Values())
+	ktLibrary.SetAttr("srcs", sequenceToSlice(maps.Keys(target.Files)))
 	ktLibrary.SetPrivateAttr(packagesKey, target)
 
 	if isTestRule {
@@ -131,9 +136,11 @@ func (kt *kotlinLang) addLibraryRule(targetName string, target *KotlinLibTarget,
 }
 
 func (kt *kotlinLang) addBinaryRule(targetName string, target *KotlinBinTarget, args language.GenerateArgs, result *language.GenerateResult) {
+	// TODO: Rely on the parser to determine the main class. The main function could be
+	// elsewhere in the file.
 	main_class := strings.TrimSuffix(target.File, ".kt")
-	if target.Package != "" {
-		main_class = target.Package + "." + main_class
+	if target.Package != nil {
+		main_class = target.Package.Literal() + "." + main_class
 	}
 
 	ktBinary := rule.NewRule(KtJvmBinary, targetName)
@@ -235,4 +242,12 @@ func (kt *kotlinLang) collectSourceFiles(cfg *kotlinconfig.KotlinConfig, args la
 func isSourceFileType(f string) bool {
 	ext := path.Ext(f)
 	return ext == ".kt" || ext == ".kts"
+}
+
+func sequenceToSlice[T any](seq iter.Seq[T]) []T {
+	var result []T
+	for item := range seq {
+		result = append(result, item)
+	}
+	return result
 }

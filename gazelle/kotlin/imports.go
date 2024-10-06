@@ -3,17 +3,19 @@ package gazelle
 import (
 	"strings"
 
+	"aspect.build/cli/gazelle/kotlin/parser"
 	"github.com/bazelbuild/bazel-gazelle/resolve"
-	godsutils "github.com/emirpasic/gods/utils"
 )
 
-// ImportStatement corresponds to a single Kotlin import. Only the package
-// information is retained in this representation of the import.
+// ImportStatement corresponds to a single Kotlin import.
 type ImportStatement struct {
 	resolve.ImportSpec
 
 	// The path of the file containing the import
 	SourcePath string
+
+	// All of the parsed import information.
+	ImportHeader *parser.ImportStatement
 }
 
 // packageFullyQualifiedName returns a [javaFullyQualifiedName] of package of the import.
@@ -22,11 +24,6 @@ type ImportStatement struct {
 // for "import foo.* as X", returns "foo"
 func (is *ImportStatement) packageFullyQualifiedName() *javaFullyQualifiedName {
 	return &javaFullyQualifiedName{strings.Split(is.Imp, ".")}
-}
-
-// importStatementComparator compares modules by name.
-func importStatementComparator(a, b interface{}) int {
-	return godsutils.StringComparator(a.(ImportStatement).Imp, b.(ImportStatement).Imp)
 }
 
 // javaFullyQualifiedName represents a fully-qualified name in Java, which is

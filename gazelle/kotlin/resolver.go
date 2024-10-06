@@ -2,8 +2,10 @@ package gazelle
 
 import (
 	"fmt"
+	"iter"
 	"log"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -15,7 +17,6 @@ import (
 	"github.com/bazelbuild/bazel-gazelle/repo"
 	"github.com/bazelbuild/bazel-gazelle/resolve"
 	"github.com/bazelbuild/bazel-gazelle/rule"
-	"github.com/emirpasic/gods/sets/treeset"
 
 	jvm_types "github.com/bazel-contrib/rules_jvm/java/gazelle/private/types"
 )
@@ -40,24 +41,25 @@ func (*kotlinLang) Name() string {
 func (kt *kotlinLang) Imports(c *config.Config, r *rule.Rule, f *rule.File) []resolve.ImportSpec {
 	BazelLog.Debugf("Imports(%s): '%s:%s'", LanguageName, f.Pkg, r.Name())
 
-	if r.PrivateAttr(packagesKey) != nil {
-		target, isLib := r.PrivateAttr(packagesKey).(*KotlinLibTarget)
-		if isLib {
-			provides := make([]resolve.ImportSpec, 0, target.Packages.Size())
-			for _, pkg := range target.Packages.Values() {
-				provides = append(provides, resolve.ImportSpec{
-					Lang: LanguageName,
-					Imp:  pkg.(string),
-				})
-			}
-
-			if len(provides) > 0 {
-				return provides
-			}
-		}
+	if r.PrivateAttr(packagesKey) == nil {
+		return nil
 	}
+	target, isLib := r.PrivateAttr(packagesKey).(*KotlinLibTarget)
+	if !isLib {
+		return nil
+	}
+	var provides []resolve.ImportSpec
 
-	return nil
+	for _, pkg := range target.Packages {
+		provides = append(provides, resolve.ImportSpec{
+			Lang: LanguageName,
+			Imp:  pkg.Literal(),
+		})
+	}
+	sort.Slice(provides, func(i, j int) bool {
+		return provides[i].Imp < provides[j].Imp
+	})
+	return provides
 }
 
 func (kt *kotlinLang) Embeds(r *rule.Rule, from label.Label) []label.Label {
@@ -77,7 +79,7 @@ func (kt *kotlinLang) Resolve(c *config.Config, ix *resolve.RuleIndex, rc *repo.
 			target = importData.(*KotlinBinTarget).KotlinTarget
 		}
 
-		deps, err := kt.resolveImports(c, ix, target.Imports, from)
+		deps, err := kt.resolveImports(c, ix, target.importsSeq(), from)
 		if err != nil {
 			log.Fatalf("Resolution Error: %v", err)
 			os.Exit(1)
@@ -94,28 +96,26 @@ func (kt *kotlinLang) Resolve(c *config.Config, ix *resolve.RuleIndex, rc *repo.
 func (kt *kotlinLang) resolveImports(
 	c *config.Config,
 	ix *resolve.RuleIndex,
-	imports *treeset.Set,
+	imports iter.Seq[*ImportStatement],
 	from label.Label,
 ) (*common.LabelSet, error) {
 	deps := common.NewLabelSet(from)
 
-	it := imports.Iterator()
-	for it.Next() {
-		mod := it.Value().(ImportStatement)
+	for impt := range imports {
 
-		resolutionType, dep, err := kt.resolveImport(c, ix, mod, from)
+		resolutionType, dep, err := kt.resolveImport(c, ix, impt, from)
 		if err != nil {
 			return nil, err
 		}
 
 		if resolutionType == Resolution_NotFound {
-			BazelLog.Debugf("import '%s' for target '%s' not found", mod.Imp, from.String())
+			BazelLog.Debugf("import '%s' for target '%s' not found", impt.Imp, from.String())
 
 			notFound := fmt.Errorf(
 				"Import %[1]q from %[2]q is an unknown dependency. Possible solutions:\n"+
 					"\t1. Instruct Gazelle to resolve to a known dependency using a directive:\n"+
 					"\t\t# gazelle:resolve [src-lang] kotlin import-string label\n",
-				mod.Imp, mod.SourcePath,
+				impt.ImportHeader.String(), impt.SourcePath,
 			)
 
 			fmt.Printf("Resolution error %v\n", notFound)
@@ -137,7 +137,7 @@ func (kt *kotlinLang) resolveImports(
 func (kt *kotlinLang) resolveImport(
 	c *config.Config,
 	ix *resolve.RuleIndex,
-	impt ImportStatement,
+	impt *ImportStatement,
 	from label.Label,
 ) (ResolutionType, *label.Label, error) {
 	imptSpec := impt.ImportSpec
