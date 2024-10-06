@@ -11,15 +11,14 @@ import (
 	jvm_types "github.com/bazel-contrib/rules_jvm/java/gazelle/private/types"
 )
 
+// IsNativeImport reports if the import literal is a native Kotlin or Java import.
 func IsNativeImport(impt string) bool {
 	if strings.HasPrefix(impt, "kotlin.") || strings.HasPrefix(impt, "kotlinx.") {
 		return true
 	}
 
-	jvm_import := jvm_types.NewPackageName(impt)
-
 	// Java native/standard libraries
-	if jvm_java.IsStdlib(jvm_import) {
+	if jvm_java.IsStdlib(jvm_types.NewPackageName(impt)) {
 		return true
 	}
 

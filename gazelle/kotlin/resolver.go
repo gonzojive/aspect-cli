@@ -11,6 +11,7 @@ import (
 
 	common "aspect.build/cli/gazelle/common"
 	"aspect.build/cli/gazelle/kotlin/kotlinconfig"
+	"aspect.build/cli/gazelle/kotlin/parser"
 	BazelLog "aspect.build/cli/pkg/logger"
 	"github.com/bazelbuild/bazel-gazelle/config"
 	"github.com/bazelbuild/bazel-gazelle/label"
@@ -103,13 +104,13 @@ func (kt *kotlinLang) resolveImports(
 
 	for impt := range imports {
 
-		resolutionType, dep, err := kt.resolveImport(c, ix, impt, from)
+		resolutionType, dep, err := kt.resolveImport(c, ix, impt.ImportHeader.Identifier(), impt, from)
 		if err != nil {
 			return nil, err
 		}
 
 		if resolutionType == Resolution_NotFound {
-			BazelLog.Debugf("import '%s' for target '%s' not found", impt.Imp, from.String())
+			BazelLog.Debugf("import %s for target %q not found", impt.ImportHeader.String(), from.String())
 
 			notFound := fmt.Errorf(
 				"Import %[1]q from %[2]q is an unknown dependency. Possible solutions:\n"+
@@ -134,26 +135,30 @@ func (kt *kotlinLang) resolveImports(
 	return deps, nil
 }
 
+// resolveImport resolves the import indicated by the [*parser.Identifier] argument.
+//
+// fromStatement indicates the import statement from which the identifier was derived, but
+// the identifier of the fromStatement may be different from identifier if this function
+// is being called recursively for a parent [*parser.Identifier].
 func (kt *kotlinLang) resolveImport(
 	c *config.Config,
 	ix *resolve.RuleIndex,
-	impt *ImportStatement,
-	from label.Label,
+	identifier *parser.Identifier,
+	fromStatement *ImportStatement,
+	fromLabel label.Label,
 ) (ResolutionType, *label.Label, error) {
-	imptSpec := impt.ImportSpec
-
 	// Gazelle overrides
 	// TODO: generalize into gazelle/common
-	if override, ok := resolve.FindRuleWithOverride(c, imptSpec, LanguageName); ok {
+	if override, ok := resolve.FindRuleWithOverride(c, importSpecForIdentifier(identifier), LanguageName); ok {
 		return Resolution_Label, &override, nil
 	}
 
 	// TODO: generalize into gazelle/common
-	if matches := ix.FindRulesByImportWithConfig(c, imptSpec, LanguageName); len(matches) > 0 {
+	if matches := ix.FindRulesByImportWithConfig(c, importSpecForIdentifier(identifier), LanguageName); len(matches) > 0 {
 		filteredMatches := make([]label.Label, 0, len(matches))
 		for _, match := range matches {
 			// Prevent from adding itself as a dependency.
-			if !match.IsSelfImport(from) {
+			if !match.IsSelfImport(fromLabel) {
 				filteredMatches = append(filteredMatches, match.Label)
 			}
 		}
@@ -161,9 +166,12 @@ func (kt *kotlinLang) resolveImport(
 		// Too many results, don't know which is correct
 		if len(filteredMatches) > 1 {
 			return Resolution_Error, nil, fmt.Errorf(
-				"Import %q from %q resolved to multiple targets (%s)"+
+				"Importing identifier %q (from the %q import statement in %q) resolved to multiple targets (%s)"+
 					" - this must be fixed using the \"gazelle:resolve\" directive",
-				impt.Imp, impt.SourcePath, targetListFromResults(matches))
+				identifier.Literal(),
+				fromStatement.ImportHeader.String(),
+				fromStatement.SourcePath,
+				targetListFromResults(matches))
 		}
 
 		// The matches were self imports, no dependency is needed
@@ -177,34 +185,30 @@ func (kt *kotlinLang) resolveImport(
 	}
 
 	// Native kotlin imports
-	if IsNativeImport(impt.Imp) {
+	if IsNativeImport(identifier.Literal()) {
 		return Resolution_NativeKotlin, nil, nil
 	}
 
-	jvm_import := jvm_types.NewPackageName(impt.Imp)
-
 	cfgs := c.Exts[LanguageName].(kotlinconfig.Configs)
-	cfg, _ := cfgs[from.Pkg]
+	cfg, _ := cfgs[fromLabel.Pkg]
 
 	// Maven imports
 	if mavenResolver := kt.mavenResolver; mavenResolver != nil {
-		if l, mavenError := (*mavenResolver).Resolve(jvm_import, cfg.ExcludedArtifacts(), cfg.MavenRepositoryName()); mavenError == nil {
+		if l, mavenError := (*mavenResolver).Resolve(jvm_types.NewPackageName(identifier.Literal()), cfg.ExcludedArtifacts(), cfg.MavenRepositoryName()); mavenError == nil {
 			return Resolution_Label, &l, nil
 		} else {
-			BazelLog.Debugf("Maven resolution failed: %v", mavenError)
+			BazelLog.Debugf("Maven resolution failed for identifier %q: %v", identifier.Literal(), mavenError)
 		}
 	}
 
 	// The original import, like "x.y.z" might be a subpackage within a package that resolves,
 	// so try to resolve the original identifer, then try to resolve the parent
 	// identifier, etc.
-	importParent := impt.packageFullyQualifiedName().Parent()
+	importParent := identifier.Parent()
 	if importParent == nil {
 		return Resolution_NotFound, nil, nil
 	}
-	parentImportSpec := impt
-	parentImportSpec.Imp = importParent.String()
-	return kt.resolveImport(c, ix, parentImportSpec, from)
+	return kt.resolveImport(c, ix, importParent, fromStatement, fromLabel)
 }
 
 // targetListFromResults returns a string with the human-readable list of

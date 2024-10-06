@@ -15,7 +15,6 @@ import (
 	"aspect.build/cli/gazelle/kotlin/parser"
 	BazelLog "aspect.build/cli/pkg/logger"
 	"github.com/bazelbuild/bazel-gazelle/language"
-	"github.com/bazelbuild/bazel-gazelle/resolve"
 	"github.com/bazelbuild/bazel-gazelle/rule"
 	"github.com/emirpasic/gods/maps/treemap"
 	"github.com/emirpasic/gods/sets/treeset"
@@ -67,10 +66,6 @@ func (kt *kotlinLang) GenerateRules(args language.GenerateArgs) language.Generat
 
 		for _, impt := range p.Imports {
 			target.addImport(&ImportStatement{
-				ImportSpec: resolve.ImportSpec{
-					Lang: LanguageName,
-					Imp:  impt.Identifier().Literal(),
-				},
 				SourcePath:   p.File,
 				ImportHeader: impt,
 			})
