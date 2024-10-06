@@ -3,6 +3,7 @@ package parser
 import (
 	"fmt"
 	"iter"
+	"regexp"
 	"strings"
 
 	treeutils "aspect.build/cli/gazelle/common/treesitter"
@@ -136,6 +137,28 @@ type SimpleIdentiifer struct {
 func (si *SimpleIdentiifer) Literal() string {
 	return si.literal
 }
+
+// Normalize returns the version of the identifier without backticks if backticks are
+// included in the identifier unnecessarily.
+func (si *SimpleIdentiifer) Normalize() *SimpleIdentiifer {
+	if !strings.HasPrefix(si.literal, "`") {
+		return si
+	}
+	betweenQuoteMarks := si.literal[1 : len(si.literal)-1]
+	if kotlinUnquotedIdentifierRegexp.MatchString(betweenQuoteMarks) {
+		return &SimpleIdentiifer{betweenQuoteMarks}
+	}
+	return si
+}
+
+// kotlinUnquotedIdentifierRegexp corresponds to the the [Identifier Kotlin grammar rule]
+// excluding the backtick-quoted syntax.
+//
+// [Identifier Kotlin grammar rule]: https://kotlinlang.org/spec/syntax-and-grammar.html#grammar-rule-Identifier
+var kotlinUnquotedIdentifierRegexp = regexp.MustCompile(
+	//(Letter | '_') {Letter | '_' | UnicodeDigit}
+	`[\p{L}_][\p{L}_\d]*`,
+)
 
 type Parser interface {
 	Parse(filePath, source string) (*ParseResult, []error)
@@ -279,7 +302,7 @@ func readImportHeader(importHeaderNode *sitter.Node, result *ParseResult, source
 		import_header/2:.*: Named=false; Symbol: 11; Content: ".*"
 	*/
 	if aliasNode := optionalOnlyChildWithType(importHeaderNode, sourceCode, "import_alias"); aliasNode != nil {
-		alias = &SimpleIdentiifer{onlyNamedChildWithType(aliasNode, sourceCode, "type_identifier").Content(sourceCode)}
+		alias = (&SimpleIdentiifer{onlyNamedChildWithType(aliasNode, sourceCode, "type_identifier").Content(sourceCode)}).Normalize()
 
 	} else if
 	/*
@@ -346,7 +369,7 @@ func readSimpleIdentifier(node *sitter.Node, sourceCode []byte) *SimpleIdentiife
 	if node.Type() != "simple_identifier" {
 		panic(fmt.Errorf("readIdentifier must be passed an 'simple_identifier' treesitter Node, got node type %q: %s", node.Type(), node.Content(sourceCode)))
 	}
-	return &SimpleIdentiifer{node.Content(sourceCode)}
+	return (&SimpleIdentiifer{node.Content(sourceCode)}).Normalize()
 }
 
 func must[T any](obj T, err error) T {
