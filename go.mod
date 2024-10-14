@@ -4,7 +4,7 @@ go 1.23.0
 
 require (
 	github.com/bazel-contrib/rules_jvm v0.27.0
-	github.com/bazelbuild/bazel-gazelle v0.39.0
+	github.com/bazelbuild/bazel-gazelle v0.39.1
 	github.com/bazelbuild/buildtools v0.0.0-20240918101019-be1c24cc9a44
 	github.com/emirpasic/gods v1.18.1
 	github.com/go-git/go-git/v5 v5.12.0

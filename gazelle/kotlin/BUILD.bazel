@@ -21,6 +21,7 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//gazelle/common",
+        "//gazelle/common/fn1",
         "//gazelle/common/git",
         "//gazelle/kotlin/kotlinconfig",
         "//gazelle/kotlin/parser",

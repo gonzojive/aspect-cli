@@ -3,7 +3,7 @@ package gazelle
 import (
 	"flag"
 	"fmt"
-	"log"
+	"slices"
 
 	jvm_javaconfig "github.com/bazel-contrib/rules_jvm/java/gazelle/javaconfig"
 	jvm_maven "github.com/bazel-contrib/rules_jvm/java/gazelle/private/maven"
@@ -12,6 +12,7 @@ import (
 	"github.com/rs/zerolog"
 
 	common "aspect.build/gazelle/gazelle/common"
+	"aspect.build/gazelle/gazelle/common/fn1"
 	"aspect.build/gazelle/gazelle/common/git"
 	"aspect.build/gazelle/gazelle/kotlin/kotlinconfig"
 	BazelLog "aspect.build/gazelle/internal/logger"
@@ -19,14 +20,24 @@ import (
 
 var _ config.Configurer = (*kotlinLang)(nil)
 
+var directivesByKey = fn1.AssociateBy[kotlinconfig.GenericDirective, string](
+	slices.Values(kotlinconfig.AllDirectives()),
+	func(dir kotlinconfig.GenericDirective) string { return dir.ConfigKey() },
+)
+
 func (kt *kotlinLang) KnownDirectives() []string {
-	return []string{
-		kotlinconfig.EnabledDirective.ConfigKey(),
+	out := []string{
 		jvm_javaconfig.JavaMavenInstallFile,
 
 		// TODO: move to common
 		git.Directive_GitIgnore,
 	}
+	out = slices.AppendSeq(out, fn1.Map(
+		slices.Values(kotlinconfig.AllDirectives()),
+		func(dir kotlinconfig.GenericDirective) string {
+			return dir.ConfigKey()
+		}))
+	return out
 }
 
 func (kc *kotlinLang) initRootConfig(c *config.Config) kotlinconfig.Configs {
@@ -64,11 +75,14 @@ func (kt *kotlinLang) Configure(c *config.Config, rel string, f *rule.File) {
 			switch d.Key {
 
 			case kotlinconfig.EnabledDirective.ConfigKey():
-				enabled, err := kotlinconfig.EnabledDirective.Parse(d)
-				if err != nil {
-					log.Fatalf("failed to parse directive %v: %v", d, err)
+				if err := kotlinconfig.EnabledDirective.Parse(d, cfg); err != nil {
+					BazelLog.Fatalf("failed to parse directive %v: %v", d, err)
 				}
-				cfg.SetGenerationEnabled(enabled)
+
+			case kotlinconfig.LibraryRuleNameSuffix.ConfigKey():
+				if err := kotlinconfig.LibraryRuleNameSuffix.Parse(d, cfg); err != nil {
+					BazelLog.Fatalf("failed to parse directive %v: %v", d, err)
+				}
 
 			// TODO: invoke java gazelle.Configure() to support all jvm directives?
 			// TODO: JavaMavenRepositoryName: https://github.com/bazel-contrib/rules_jvm/commit/e46bb11bedb2ead45309eae04619caca684f6243
@@ -79,7 +93,16 @@ func (kt *kotlinLang) Configure(c *config.Config, rel string, f *rule.File) {
 			// TODO: move to common
 			case git.Directive_GitIgnore:
 				git.EnableGitignore(c, common.ReadEnabled(d))
+
+			default:
+				dir, ok := directivesByKey[d.Key]
+				if ok {
+					if err := dir.Parse(d, cfg); err != nil {
+						BazelLog.Fatalf("error parsing kotlin directive: %v", err)
+					}
+				}
 			}
+
 		}
 	}
 

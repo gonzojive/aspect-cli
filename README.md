@@ -25,13 +25,64 @@ The rules followed by this plugin are as follows:
    
 3. An identifier matches a [Maven
    artifact](https://maven.apache.org/repositories/artifacts.html) if one of the
-   packages declared as an export of that artifact is a package prefix
+   packages declared as an export of that artifact is a package prefix of an
+   import.
 
 4. If the import to be resolved is in the library index, the import will be resolved to that library. If `-index=true`, Gazelle builds an index of library rules in the current repository before starting dependency resolution, and this is how most dependencies are resolved.
 
    1. For Kotlin, the match is based on the importpath attribute.
 
    2. For proto, the match is based on the srcs attribute.
+
+## Target Assignment of Source Files
+
+The plugin will use the following algorithm to decide what targets to create and
+associate with source files within a Bazel package.
+
+1. A default `kt_jvm_library` target is created for each package in the
+   repository for which the plugin is enabled. Initially, the `srcs` associated
+   with this target is the empty set. The name of this target is configurable
+   using the `# gazelle:kotlin library_suffix foo` directive. By default, the
+   name is the basename of the package directory + `"_lib"`.
+
+2. The plugin will inspect each source file in a package and assign it to
+   zero or more targets within the same package.
+
+   1. If a source file is already present in the `srcs` of a target known
+      to the plugin, the plugin will not create an additional target for
+      the source file.
+
+   2. **Binary Source Files:** Files containing a `main` function are assigned
+      to a `kt_jvm_binary` target. This target will depend on all the
+      `kt_jvm_library` targets in the same package as well as all of the
+      labels that resolve based 
+
+
+   3. **Test Source Files:** Files ending in `Test.kt` are assigned to a
+      `kt_jvm_test` target.
+   
+   4. Otherwise, a `.kt` file will be assigned to the default `kt_jvm_library`.
+
+
+
+### Note on target granularity
+
+It is recommended to group all source files within a package into a single
+`kt_jvm_library` target.
+
+When there are multiple `kt_jvm_library` targets for a single Bazel package,
+resolving dependencies between these targets is more challenging because import
+statements are not used to express intra-package dependencies, and the plugin
+does not attempt to perform the semantic analysis required to resolve all
+identifiers in a source file. Because of this limitation, when choosing to use
+multiple `library` targets per Bazel package, explicit `deps` entries with
+`#keep` comments must be added by the author.
+
+
+**8\. `only-use-existing-library-targets` Directive:**
+
+-   `#gazelle:kotlin only-use-existing-library-targets enable` prevents the plugin from generating new library targets.
+-   It requires users to explicitly define dependencies between existing targets using `deps` attributes and `#keep` comments to prevent dependency pruning.
 
 
 # Terminology
@@ -52,7 +103,26 @@ and will apply the the behavior of the Kotlin plugin.
 
 The Kotlin plugin has additional directives for configuring behavior:
 
-## gazelle:java_maven_install_file
+## gazelle:kotlin *\{enabledStatus: String\}*
+Enables or disables the gazelle plugin in this bazel package and all child packages,
+unless overridden.
+
+Arguments:
+
+- enabledStatus - String: One of "enabled" or "disabled"
+
+## gazelle:kotlin_only_use_existing_library_targets *\{enabledStatus: String\}*
+If enabled, only existing `kt_jvm_library` targets will be used. No new targets
+will be generated.
+
+If this mode is enabled, users must explicitly define intra-package dependencies
+using `deps` attributes and `#keep` comments to prevent dependency pruning.
+
+Arguments:
+
+- enabledStatus - String: One of "enabled" or "disabled"
+
+## gazelle:java_maven_install_file *\{path: String\}*
 
 Specifies where the `maven_install.json` file is located.
 
