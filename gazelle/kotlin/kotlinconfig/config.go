@@ -6,9 +6,39 @@ import (
 	"strings"
 
 	"github.com/bazel-contrib/rules_jvm/java/gazelle/javaconfig"
+	"github.com/bazelbuild/bazel-gazelle/rule"
 )
 
-const Directive_KotlinExtension = "kotlin"
+type Directive[ParsedType any] struct {
+	configKey string
+	parseFn   func(d rule.Directive) (ParsedType, error)
+}
+
+// ConfigKey returns the string key used for this configuration directive
+// in gazelle comments.
+//
+// For a directive like "# gazelle:blah foo bar", returns "blah".
+func (d *Directive[ParsedType]) ConfigKey() string { return d.configKey }
+
+// Parse parses the directive value.
+func (d *Directive[ParsedType]) Parse(dir rule.Directive) (ParsedType, error) {
+	return d.parseFn(dir)
+}
+
+// The directive for enable or disabling the gazelle plugin.
+var EnabledDirective = &Directive[bool]{
+	"kotlin",
+	func(d rule.Directive) (bool, error) {
+		switch strings.TrimSpace(d.Value) {
+		case "enabled":
+			return true, nil
+		case "disabled":
+			return false, nil
+		default:
+			return false, fmt.Errorf("invalid directive value %q for key %q: expected enabled or disabled", d.Key, d.Value)
+		}
+	},
+}
 
 type KotlinConfig struct {
 	javaConfig *javaconfig.Config
@@ -42,7 +72,7 @@ func (c *KotlinConfig) path() string {
 		return c.rel
 	}
 	return c.rel
-	//return c.parent.path() + "/" + c.rel
+	// return c.parent.path() + "/" + c.rel
 }
 
 // NewChild creates a new child Config. It inherits desired values from the

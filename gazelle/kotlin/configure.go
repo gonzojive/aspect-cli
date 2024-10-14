@@ -3,6 +3,7 @@ package gazelle
 import (
 	"flag"
 	"fmt"
+	"log"
 
 	jvm_javaconfig "github.com/bazel-contrib/rules_jvm/java/gazelle/javaconfig"
 	jvm_maven "github.com/bazel-contrib/rules_jvm/java/gazelle/private/maven"
@@ -20,7 +21,7 @@ var _ config.Configurer = (*kotlinLang)(nil)
 
 func (kt *kotlinLang) KnownDirectives() []string {
 	return []string{
-		kotlinconfig.Directive_KotlinExtension,
+		kotlinconfig.EnabledDirective.ConfigKey(),
 		jvm_javaconfig.JavaMavenInstallFile,
 
 		// TODO: move to common
@@ -62,8 +63,12 @@ func (kt *kotlinLang) Configure(c *config.Config, rel string, f *rule.File) {
 		for _, d := range f.Directives {
 			switch d.Key {
 
-			case kotlinconfig.Directive_KotlinExtension:
-				cfg.SetGenerationEnabled(common.ReadEnabled(d))
+			case kotlinconfig.EnabledDirective.ConfigKey():
+				enabled, err := kotlinconfig.EnabledDirective.Parse(d)
+				if err != nil {
+					log.Fatalf("failed to parse directive %v: %v", d, err)
+				}
+				cfg.SetGenerationEnabled(enabled)
 
 			// TODO: invoke java gazelle.Configure() to support all jvm directives?
 			// TODO: JavaMavenRepositoryName: https://github.com/bazel-contrib/rules_jvm/commit/e46bb11bedb2ead45309eae04619caca684f6243
