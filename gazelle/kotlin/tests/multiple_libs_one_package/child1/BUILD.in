@@ -1,8 +1,7 @@
 load("@io_bazel_rules_kotlin//kotlin:jvm.bzl", "kt_jvm_library")
 
-# gazelle:kotlin_only_use_existing_library_targets enabled
-#
 # gazelle:resolve kotlin kotlin foo.bar @foo//bar
+# gazelle:kotlin_only_use_existing_library_targets enabled
 
 kt_jvm_library(
     name = "library1",
