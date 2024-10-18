@@ -92,7 +92,7 @@ func (kt *kotlinLang) Resolve(c *config.Config, ix *resolve.RuleIndex, rc *repo.
 			if resolutionType, depLabel, err := kt.resolveImport(c, ix, testTarget.Package, from, importContext); err != nil {
 				log.Fatalf("error resolving library dependency of test: %v", err)
 			} else if resolutionType == Resolution_Label {
-				extraDeps = append(extraDeps, depLabel)
+				extraDeps = append(extraDeps, depLabel...)
 			}
 
 		default:
@@ -132,7 +132,7 @@ func (kt *kotlinLang) resolveImports(
 			return fmt.Sprintf("the %q import statement in %q", impt.ImportHeader.String(), impt.SourcePath)
 		}
 
-		resolutionType, dep, err := kt.resolveImport(c, ix, impt.ImportHeader.Identifier(), from, importContext)
+		resolutionType, depList, err := kt.resolveImport(c, ix, impt.ImportHeader.Identifier(), from, importContext)
 		if err != nil {
 			return nil, err
 		}
@@ -155,7 +155,7 @@ func (kt *kotlinLang) resolveImports(
 			continue
 		}
 
-		if dep != nil {
+		for _, dep := range depList {
 			deps.Add(dep)
 		}
 	}
@@ -177,25 +177,25 @@ func (kt *kotlinLang) resolveImport(
 	identifier *parser.Identifier,
 	fromLabel label.Label,
 	importContext func() string,
-) (ResolutionType, *label.Label, error) {
+) (ResolutionType, []*label.Label, error) {
 	// Gazelle overrides
 	// TODO: generalize into gazelle/common
 	if override, ok := resolve.FindRuleWithOverride(c, importSpecForIdentifier(identifier), LanguageName); ok {
-		return Resolution_Label, &override, nil
+		return Resolution_Label, []*label.Label{&override}, nil
 	}
 
 	// TODO: generalize into gazelle/common
 	if matches := ix.FindRulesByImportWithConfig(c, importSpecForIdentifier(identifier), LanguageName); len(matches) > 0 {
-		filteredMatches := make([]label.Label, 0, len(matches))
+		filteredMatches := []*label.Label{}
 		for _, match := range matches {
 			// Prevent from adding itself as a dependency.
 			if !match.IsSelfImport(fromLabel) {
-				filteredMatches = append(filteredMatches, match.Label)
+				filteredMatches = append(filteredMatches, &match.Label)
 			}
 		}
 
 		// Too many results, don't know which is correct
-		if len(filteredMatches) > 1 {
+		if len(filteredMatches) > 1 && !allLabelsSamePackage(filteredMatches) {
 			return Resolution_Error, nil, fmt.Errorf(
 				"Importing identifier %q (from %s) resolved to multiple targets (%s)"+
 					" - this must be fixed using the \"gazelle:resolve\" directive",
@@ -209,9 +209,7 @@ func (kt *kotlinLang) resolveImport(
 			return Resolution_None, nil, nil
 		}
 
-		match := filteredMatches[0]
-
-		return Resolution_Label, &match, nil
+		return Resolution_Label, filteredMatches, nil
 	}
 
 	// Native kotlin imports
@@ -225,7 +223,7 @@ func (kt *kotlinLang) resolveImport(
 	// Maven imports
 	if mavenResolver := kt.mavenResolver; mavenResolver != nil {
 		if l, mavenError := (*mavenResolver).Resolve(jvm_types.NewPackageName(identifier.Literal()), cfg.JavaConfig().ExcludedArtifacts(), cfg.JavaConfig().MavenRepositoryName()); mavenError == nil {
-			return Resolution_Label, &l, nil
+			return Resolution_Label, []*label.Label{&l}, nil
 		} else {
 			BazelLog.Debugf("Maven resolution failed for identifier %q: %v", identifier.Literal(), mavenError)
 		}
@@ -239,6 +237,19 @@ func (kt *kotlinLang) resolveImport(
 		return Resolution_NotFound, nil, nil
 	}
 	return kt.resolveImport(c, ix, importParent, fromLabel, importContext)
+}
+
+func allLabelsSamePackage(filteredMatches []*label.Label) bool {
+	if len(filteredMatches) == 0 {
+		return true
+	}
+	a := filteredMatches[0]
+	for _, b := range filteredMatches {
+		if a.Pkg != b.Pkg {
+			return false
+		}
+	}
+	return true
 }
 
 // targetListFromResults returns a string with the human-readable list of

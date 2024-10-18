@@ -41,54 +41,46 @@ func (kt *kotlinLang) GenerateRules(args language.GenerateArgs) language.Generat
 		return language.GenerateResult{}
 	}
 
-	BazelLog.Tracef("GenerateRules(%s): %s", LanguageName, args.Rel)
+	BazelLog.Tracef("GenerateRules(%s): %s; config = %s", LanguageName, args.Rel, cfg)
 
 	// Collect all source files.
 	sourceFiles := kt.collectSourceFiles(cfg, args)
 
 	// TODO: multiple library targets (lib, test, ...)
-	libTarget := NewKotlinLibTarget()
+	libTargets := newLibTargetsForPackage(cfg, sourceFiles, args.File)
+	// libTarget := NewKotlinLibTarget()
 	binTargets := map[string]*KotlinBinTarget{}
 	var testTargets []*KotlinTestTarget
 
 	// Parse all source files and group information into target(s)
 	for p := range kt.parseFiles(args, sourceFiles) {
-		var target *KotlinTarget
-
 		if cfg.IsTestBaseName(filepath.Base(p.File)) {
 			testTarget := NewKotlinTestTarget([]string{p.File}, p.Package, guessClassName(p))
 			testTargets = append(testTargets, testTarget)
-			target = &testTarget.KotlinTarget
+			addImportsToTarget(&testTarget.KotlinTarget, p)
 		} else if p.HasMain {
 			binTarget := NewKotlinBinTarget(p.File, p.Package)
 			binTargets[p.File] = binTarget
-
-			target = &binTarget.KotlinTarget
+			addImportsToTarget(&binTarget.KotlinTarget, p)
 		} else {
-			libTarget.addFile(p.File)
-			if p.Package != nil {
-				libTarget.addPackage(p.Package)
-			}
-
-			target = &libTarget.KotlinTarget
-		}
-
-		for _, impt := range p.Imports {
-			target.addImport(&ImportStatement{
-				SourcePath:   p.File,
-				ImportHeader: impt,
-			})
+			libTargets.collectSourceFile(p)
 		}
 	}
 
 	var result language.GenerateResult
 
-	libTargetName := gazelle.ToDefaultTargetName(args, "root")
-
-	srcGenErr := kt.addLibraryRule(libTargetName, libTarget, args, false, &result)
-	if srcGenErr != nil {
-		fmt.Fprintf(os.Stderr, "Source rule generation error: %v\n", srcGenErr)
-		os.Exit(1)
+	for _, libTarget := range libTargets.allTargets() {
+		if len(libTarget.Files) != 0 {
+			libTargetName := gazelle.ToDefaultTargetName(args, "root")
+			if libTarget.ExistingName != "" {
+				libTargetName = libTarget.ExistingName
+			}
+			srcGenErr := kt.addLibraryRule(libTargetName, libTarget, args, false, &result)
+			if srcGenErr != nil {
+				fmt.Fprintf(os.Stderr, "Library rule generation error: %v\n", srcGenErr)
+				os.Exit(1)
+			}
+		}
 	}
 
 	sortedBinTargets := slices.SortedFunc(maps.Values(binTargets), func(a, b *KotlinBinTarget) int {
@@ -97,7 +89,10 @@ func (kt *kotlinLang) GenerateRules(args language.GenerateArgs) language.Generat
 
 	for _, binTarget := range sortedBinTargets {
 		binTargetName := toBinaryTargetName(binTarget.File)
-		kt.addBinaryRule(binTargetName, binTarget, args, &result)
+		if err := kt.addBinaryRule(binTargetName, binTarget, args, &result); err != nil {
+			fmt.Fprintf(os.Stderr, "Binary rule generation error: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	sort.Slice(testTargets, func(i, j int) bool {
@@ -106,10 +101,90 @@ func (kt *kotlinLang) GenerateRules(args language.GenerateArgs) language.Generat
 
 	for _, target := range testTargets {
 		binTargetName := toTestTargetName(target.Files[0])
-		kt.addTestRule(binTargetName, target, args, &result)
+		if err := kt.addTestRule(binTargetName, target, args, &result); err != nil {
+			fmt.Fprintf(os.Stderr, "Test rule generation error: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	return result
+}
+
+func addImportsToTarget(target *KotlinTarget, file *parser.ParseResult) {
+	for _, impt := range file.Imports {
+		target.addImport(&ImportStatement{
+			SourcePath:   file.File,
+			ImportHeader: impt,
+		})
+	}
+}
+
+type libTargetsForPackage struct {
+	cfg                   *kotlinconfig.KotlinConfig
+	defaultTarget         *KotlinLibTarget
+	existingFileToTargets map[string][]*KotlinLibTarget
+}
+
+func newLibTargetsForPackage(cfg *kotlinconfig.KotlinConfig, sourceFiles []string, buildFile *rule.File) *libTargetsForPackage {
+	defaultTarget := NewKotlinLibTarget()
+	fileToTargets := map[string][]*KotlinLibTarget{}
+
+	if cfg.OnlyUseExistingLibraryTargets() {
+		for _, rule := range buildFile.Rules {
+			// TODO: Use MappedKind to canonicalize the kind here?
+			if rule.Kind() != KtJvmLibrary {
+				continue
+			}
+			target := NewKotlinLibTarget()
+			target.ExistingName = rule.Name()
+			for _, file := range rule.AttrStrings("srcs") {
+				target.addFile(file)
+				fileToTargets[file] = append(fileToTargets[file], target)
+			}
+		}
+		defaultTarget = nil
+	}
+
+	return &libTargetsForPackage{
+		cfg,
+		defaultTarget,
+		fileToTargets,
+	}
+}
+
+func (lts *libTargetsForPackage) collectSourceFile(pr *parser.ParseResult) error {
+	targets := lts.existingFileToTargets[pr.File]
+	if len(targets) == 0 {
+		if lts.cfg.OnlyUseExistingLibraryTargets() {
+			return fmt.Errorf("failed to process source file %q: OnlyUseExistingLibraryTargets is specified, yet %q doesn't appear in srcs of any %s target", pr.File, pr.File, KtJvmLibrary)
+		}
+		targets = append(targets, lts.defaultTarget)
+	}
+	for _, target := range targets {
+		target.addFile(pr.File)
+		if pr.Package != nil {
+			target.addPackage(pr.Package)
+		}
+		addImportsToTarget(&target.KotlinTarget, pr)
+	}
+	return nil
+}
+
+func (lts *libTargetsForPackage) allTargets() []*KotlinLibTarget {
+	set := map[*KotlinLibTarget]struct{}{}
+	if lts.defaultTarget != nil {
+		set[lts.defaultTarget] = struct{}{}
+	}
+	for _, targets := range lts.existingFileToTargets {
+		for _, target := range targets {
+			set[target] = struct{}{}
+		}
+	}
+	out := slices.Collect(maps.Keys(set))
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].ExistingName < out[j].ExistingName
+	})
+	return out
 }
 
 func (kt *kotlinLang) addLibraryRule(targetName string, target *KotlinLibTarget, args language.GenerateArgs, isTestRule bool, result *language.GenerateResult) error {
@@ -151,7 +226,12 @@ func (kt *kotlinLang) addLibraryRule(targetName string, target *KotlinLibTarget,
 	return nil
 }
 
-func (kt *kotlinLang) addBinaryRule(targetName string, target *KotlinBinTarget, args language.GenerateArgs, result *language.GenerateResult) {
+func (kt *kotlinLang) addBinaryRule(targetName string, target *KotlinBinTarget, args language.GenerateArgs, result *language.GenerateResult) error {
+	// Check for name-collisions with the rule being generated.
+	colError := gazelle.CheckCollisionErrors(targetName, KtJvmBinary, treeset.NewWithStringComparator(KtJvmBinary), args)
+	if colError != nil {
+		return colError
+	}
 	// TODO: Rely on the parser to determine the main class. The main function could be
 	// elsewhere in the file.
 	main_class := strings.TrimSuffix(target.File, ".kt")
@@ -168,11 +248,12 @@ func (kt *kotlinLang) addBinaryRule(targetName string, target *KotlinBinTarget, 
 	result.Imports = append(result.Imports, target)
 
 	BazelLog.Infof("add rule '%s' '%s:%s'", ktBinary.Kind(), args.Rel, ktBinary.Name())
+	return nil
 }
 
 func (kt *kotlinLang) addTestRule(targetName string, target *KotlinTestTarget, args language.GenerateArgs, result *language.GenerateResult) error {
 	// Check for name-collisions with the rule being generated.
-	colError := gazelle.CheckCollisionErrors(targetName, KtJvmTest, sourceRuleKinds, args)
+	colError := gazelle.CheckCollisionErrors(targetName, KtJvmTest, treeset.NewWithStringComparator(KtJvmTest), args)
 	if colError != nil {
 		return colError
 	}
@@ -208,7 +289,7 @@ func (kt *kotlinLang) addTestRule(targetName string, target *KotlinTestTarget, a
 }
 
 // TODO: put in common?
-func (kt *kotlinLang) parseFiles(args language.GenerateArgs, sources *treeset.Set) chan *parser.ParseResult {
+func (kt *kotlinLang) parseFiles(args language.GenerateArgs, sources []string) chan *parser.ParseResult {
 	// The channel of all files to parse.
 	sourcePathChannel := make(chan string)
 
@@ -216,7 +297,7 @@ func (kt *kotlinLang) parseFiles(args language.GenerateArgs, sources *treeset.Se
 	resultsChannel := make(chan *parser.ParseResult)
 
 	// The number of workers. Don't create more workers than necessary.
-	workerCount := int(math.Min(MaxWorkerCount, float64(1+sources.Size()/2)))
+	workerCount := int(math.Min(MaxWorkerCount, float64(1+len(sources)/2)))
 
 	// Start the worker goroutines.
 	var wg sync.WaitGroup
@@ -243,9 +324,8 @@ func (kt *kotlinLang) parseFiles(args language.GenerateArgs, sources *treeset.Se
 
 	// Send files to the workers.
 	go func() {
-		sourceFileChannelIt := sources.Iterator()
-		for sourceFileChannelIt.Next() {
-			sourcePathChannel <- sourceFileChannelIt.Value().(string)
+		for _, src := range sources {
+			sourcePathChannel <- src
 		}
 
 		close(sourcePathChannel)
@@ -273,8 +353,8 @@ func parseFile(rootDir, filePath string) (*parser.ParseResult, []error) {
 	return p.Parse(filePath, string(content))
 }
 
-func (kt *kotlinLang) collectSourceFiles(cfg *kotlinconfig.KotlinConfig, args language.GenerateArgs) *treeset.Set {
-	sourceFiles := treeset.NewWithStringComparator()
+func (kt *kotlinLang) collectSourceFiles(cfg *kotlinconfig.KotlinConfig, args language.GenerateArgs) []string {
+	sourceFilesMap := map[string]struct{}{}
 
 	// TODO: "module" targets similar to java?
 
@@ -285,12 +365,14 @@ func (kt *kotlinLang) collectSourceFiles(cfg *kotlinconfig.KotlinConfig, args la
 		if isSourceFileType(f) {
 			BazelLog.Tracef("SourceFile: %s", f)
 
-			sourceFiles.Add(f)
+			sourceFilesMap[f] = struct{}{}
 		}
 
 		return nil
 	})
 
+	sourceFiles := slices.Collect(maps.Keys(sourceFilesMap))
+	sort.Strings(sourceFiles)
 	return sourceFiles
 }
 

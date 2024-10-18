@@ -49,6 +49,8 @@ type KotlinLibTarget struct {
 
 	Packages map[string]*parser.Identifier
 	Files    map[string]struct{}
+
+	ExistingName string
 }
 
 func (t *KotlinLibTarget) addFile(file string) {

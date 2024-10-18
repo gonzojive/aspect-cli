@@ -4,11 +4,12 @@ import (
 	"fmt"
 	"path"
 
-	BazelLog "aspect.build/gazelle/internal/logger"
 	"github.com/bazelbuild/bazel-gazelle/label"
 	"github.com/bazelbuild/bazel-gazelle/language"
 	"github.com/bazelbuild/bazel-gazelle/rule"
 	"github.com/emirpasic/gods/sets/treeset"
+
+	BazelLog "aspect.build/gazelle/internal/logger"
 )
 
 // Return the default target name for the given language.GenerateArgs.

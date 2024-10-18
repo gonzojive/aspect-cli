@@ -1,0 +1,12 @@
+load("@io_bazel_rules_kotlin//kotlin:jvm.bzl", "kt_jvm_library")
+
+# gazelle:kotlin_only_use_existing_library_targets disabled
+
+kt_jvm_library(
+    name = "child2",
+    srcs = ["lib2.kt"],
+    deps = [
+        "//child1:library1",
+        "//child1:library2",
+    ],
+)
