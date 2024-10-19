@@ -134,9 +134,13 @@ Arguments:
   file will be used to determine the set of Kotlin identifiers associated
   with a source file (and that source files' Bazel target).
 
-  - "top_level_objects": Default, specifies that the package statement of
-  the source file will be used to determine the set of Kotlin identifiers
-  associated  with a source file (and that source files' Bazel target).
+  - "top_level_objects": Specifies that the top-level objects defined in the
+  source files of the target will be used to determine the identifiers
+  associated with the target. For example, if a `class Foo` is defined in a
+  source file with package `com.example`, the `com.example.Foo` identifier
+  prefix will be associated with the library target of the source file and used
+  to resolve imports like `import com.example.Foo.Bar` but not other imports of
+  identifiers within the `com.example` package.
 
 ## gazelle:java_maven_install_file *\{path: String\}*
 

@@ -90,9 +90,12 @@ var (
 	// file will be used to determine the set of Kotlin identifiers associated
 	// with a source file (and that source files' Bazel target).
 	//
-	// - "top_level_objects": Default, specifies that the package statement of
-	// the source file will be used to determine the set of Kotlin identifiers
-	// associated  with a source file (and that source files' Bazel target).
+	// - "top_level_objects": Specifies that the top-level objects defined in
+	// the source files of the target will be used to determine the identifiers
+	// associated with the target. For example, if a class Foo is defined
+	// in a source file with package com.example, the "com.example.Foo"
+	// identifier prefix would be associated with the library target of the
+	// source file and used to resolve imports.
 	ExportGranularityDirective = &Directive[ExportGranularity]{
 		"kotlin_export_granularity",
 		parseExportGranularity,
