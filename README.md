@@ -122,6 +122,22 @@ Arguments:
 
 - enabledStatus - String: One of "enabled" or "disabled"
 
+## gazelle:kotlin_export_granularity *\{granularity: "top_level_objects" \| "package"}*
+Configures how the set of Kotlin identifiers associated with a source file
+should be determined.
+
+Arguments:
+
+- granularity - String: One of "top_level_objects" or "package"
+
+  - "package": Default, specifies that the package statement of the source
+  file will be used to determine the set of Kotlin identifiers associated
+  with a source file (and that source files' Bazel target).
+
+  - "top_level_objects": Default, specifies that the package statement of
+  the source file will be used to determine the set of Kotlin identifiers
+  associated  with a source file (and that source files' Bazel target).
+
 ## gazelle:java_maven_install_file *\{path: String\}*
 
 Specifies where the `maven_install.json` file is located.

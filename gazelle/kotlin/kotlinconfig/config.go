@@ -80,6 +80,24 @@ var (
 		},
 		func(val string, cfg *KotlinConfig) { cfg.SetLibrarySuffix(val) },
 	}
+
+	// A directive that configures how the set of Kotlin identifiers associated
+	// with a source file should be determined.
+	//
+	// Valid values:
+	//
+	// - "package": Default, specifies that the package statement of the source
+	// file will be used to determine the set of Kotlin identifiers associated
+	// with a source file (and that source files' Bazel target).
+	//
+	// - "top_level_objects": Default, specifies that the package statement of
+	// the source file will be used to determine the set of Kotlin identifiers
+	// associated  with a source file (and that source files' Bazel target).
+	ExportGranularityDirective = &Directive[ExportGranularity]{
+		"kotlin_export_granularity",
+		parseExportGranularity,
+		func(val ExportGranularity, cfg *KotlinConfig) { cfg.SetExportGranularity(val) },
+	}
 )
 
 // AllDirectives returns all directives defined by the kotlin plugin. This list excludes
@@ -90,6 +108,7 @@ func AllDirectives() []GenericDirective {
 		EnabledDirective,
 		OnlyUseExistingLibraryTargetsDirective,
 		LibraryRuleNameSuffix,
+		ExportGranularityDirective,
 	}
 }
 
@@ -104,6 +123,25 @@ func parseEnabledDisableDirective(d rule.Directive) (bool, error) {
 	}
 }
 
+// ExportGranularity defines valid values for the [ExportGranularityDirective].
+type ExportGranularity string
+
+const (
+	// Package-level identifier resolution. See [ExportGranularityPackage]
+	ExportGranularityPackage = "package"
+	// Identifier resolution.
+	ExportGranularityTopLevelObjects = "top_level_objects"
+)
+
+func parseExportGranularity(d rule.Directive) (ExportGranularity, error) {
+	switch value := ExportGranularity(strings.TrimSpace(d.Value)); value {
+	case ExportGranularityPackage, ExportGranularityTopLevelObjects:
+		return value, nil
+	default:
+		return "", fmt.Errorf("invalid directive value %q for key %q: expected one of {%s, %s}", d.Key, d.Value, ExportGranularityPackage, ExportGranularityTopLevelObjects)
+	}
+}
+
 type KotlinConfig struct {
 	javaConfig *javaconfig.Config
 
@@ -115,6 +153,8 @@ type KotlinConfig struct {
 
 	generationEnabled             bool
 	onlyUseExistingLibraryTargets bool
+
+	exportGranularity ExportGranularity
 }
 
 type Configs = map[string]*KotlinConfig
@@ -126,6 +166,7 @@ func New(repoRoot string) *KotlinConfig {
 		parent:            nil,
 		testFileSuffixes:  []string{"Test.kt"},
 		librarySuffix:     "_lib",
+		exportGranularity: ExportGranularityPackage,
 	}
 }
 
@@ -150,6 +191,16 @@ func (c *KotlinConfig) NewChild(childPath string) *KotlinConfig {
 	cCopy.parent = c
 	cCopy.testFileSuffixes = append([]string(nil), c.testFileSuffixes...)
 	return &cCopy
+}
+
+// SetExportGranularity sets the export granularity for the config.
+func (c *KotlinConfig) SetExportGranularity(granularity ExportGranularity) {
+	c.exportGranularity = granularity
+}
+
+// ExportGranularity returns the export granularity for the config.
+func (c *KotlinConfig) ExportGranularity() ExportGranularity {
+	return c.exportGranularity
 }
 
 // SetGenerationEnabled sets whether the extension is enabled or not.

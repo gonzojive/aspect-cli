@@ -182,6 +182,12 @@ func (si *SimpleIdentifier) Normalize() *SimpleIdentifier {
 	return si
 }
 
+// AsIdentifier returns a fully-qualified [Identifier] consisting of a single
+// name component - this identifier.
+func (si *SimpleIdentifier) AsIdentifier() *Identifier {
+	return &Identifier{[]*SimpleIdentifier{si}}
+}
+
 // kotlinUnquotedIdentifierRegexp corresponds to the the [Identifier Kotlin grammar rule]
 // excluding the backtick-quoted syntax.
 //

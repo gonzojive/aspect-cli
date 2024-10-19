@@ -1,6 +1,6 @@
-package child1
+package child3
 // Hello World Program
 
-fun lib1bfn() {
+fun lib1fn() {
     println("Hello world!")
 }
