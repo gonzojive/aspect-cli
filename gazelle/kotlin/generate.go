@@ -165,7 +165,7 @@ func (lts *libTargetsForPackage) collectSourceFile(exportGranularity kotlinconfi
 		switch exportGranularity {
 		case kotlinconfig.ExportGranularityPackage:
 			if pr.Package != nil {
-				target.addExportedKotlinIdentifier(pr.Package)
+				target.addIdentifierPrefix(pr.Package)
 			}
 		case kotlinconfig.ExportGranularityTopLevelObjects:
 			for _, id := range pr.TopLevelIdentifiers {
@@ -176,7 +176,7 @@ func (lts *libTargetsForPackage) collectSourceFile(exportGranularity kotlinconfi
 					fullyQualifiedId = pr.Package.Child(id)
 				}
 
-				target.addExportedKotlinIdentifier(fullyQualifiedId)
+				target.addIdentifierPrefix(fullyQualifiedId)
 			}
 		default:
 		}

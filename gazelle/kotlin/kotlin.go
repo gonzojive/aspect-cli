@@ -47,8 +47,10 @@ func (t *KotlinTarget) importsSeq() iter.Seq[*ImportStatement] {
 type KotlinLibTarget struct {
 	KotlinTarget
 
-	// Kotlin identifiers defiend by the srcs of this target.
-	Identifiers map[string]*parser.Identifier
+	// Kotlin identifier prefixes that should resolve to this target.
+	//
+	// Typically this value is derived from analyzing the package statement, and possibly the top-level identifiers, of the srcs of the target.
+	IdentifierPrefixes map[string]*parser.Identifier
 
 	// File names of Kotlin src files. File names should be relative to
 	// this package.
@@ -63,8 +65,8 @@ func (t *KotlinLibTarget) addFile(file string) {
 	t.Files[file] = struct{}{}
 }
 
-func (t *KotlinLibTarget) addExportedKotlinIdentifier(pkg *parser.Identifier) {
-	t.Identifiers[pkg.Literal()] = pkg
+func (t *KotlinLibTarget) addIdentifierPrefix(pkg *parser.Identifier) {
+	t.IdentifierPrefixes[pkg.Literal()] = pkg
 }
 
 func NewKotlinLibTarget() *KotlinLibTarget {
@@ -72,8 +74,8 @@ func NewKotlinLibTarget() *KotlinLibTarget {
 		KotlinTarget: KotlinTarget{
 			Imports: make(map[string]*ImportStatement),
 		},
-		Identifiers: make(map[string]*parser.Identifier),
-		Files:       make(map[string]struct{}),
+		IdentifierPrefixes: make(map[string]*parser.Identifier),
+		Files:              make(map[string]struct{}),
 	}
 }
 
