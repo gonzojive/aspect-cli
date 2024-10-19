@@ -1,4 +1,4 @@
-package child1
+package child3
 // Hello World Program
 
 import foo.bar.Thing

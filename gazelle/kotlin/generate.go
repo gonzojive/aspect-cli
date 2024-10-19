@@ -63,7 +63,7 @@ func (kt *kotlinLang) GenerateRules(args language.GenerateArgs) language.Generat
 			binTargets[p.File] = binTarget
 			addImportsToTarget(&binTarget.KotlinTarget, p)
 		} else {
-			libTargets.collectSourceFile(p)
+			libTargets.collectSourceFile(cfg.ExportGranularity(), p)
 		}
 	}
 
@@ -152,7 +152,7 @@ func newLibTargetsForPackage(cfg *kotlinconfig.KotlinConfig, sourceFiles []strin
 	}
 }
 
-func (lts *libTargetsForPackage) collectSourceFile(pr *parser.ParseResult) error {
+func (lts *libTargetsForPackage) collectSourceFile(exportGranularity kotlinconfig.ExportGranularity, pr *parser.ParseResult) error {
 	targets := lts.existingFileToTargets[pr.File]
 	if len(targets) == 0 {
 		if lts.cfg.OnlyUseExistingLibraryTargets() {
@@ -162,8 +162,23 @@ func (lts *libTargetsForPackage) collectSourceFile(pr *parser.ParseResult) error
 	}
 	for _, target := range targets {
 		target.addFile(pr.File)
-		if pr.Package != nil {
-			target.addPackage(pr.Package)
+		switch exportGranularity {
+		case kotlinconfig.ExportGranularityPackage:
+			if pr.Package != nil {
+				target.addIdentifierPrefix(pr.Package)
+			}
+		case kotlinconfig.ExportGranularityTopLevelObjects:
+			for _, id := range pr.TopLevelIdentifiers {
+				var fullyQualifiedId *parser.Identifier
+				if pr.Package == nil {
+					fullyQualifiedId = id.AsIdentifier()
+				} else {
+					fullyQualifiedId = pr.Package.Child(id)
+				}
+
+				target.addIdentifierPrefix(fullyQualifiedId)
+			}
+		default:
 		}
 		addImportsToTarget(&target.KotlinTarget, pr)
 	}

@@ -1,10 +1,14 @@
 package parser
 
 import (
+	"slices"
+	"sort"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+
+	"aspect.build/gazelle/gazelle/common/fn1"
 )
 
 var testCases = []struct {
@@ -110,6 +114,41 @@ value class Password(private val s: String)
 			File:    "simple.kt",
 			Package: "",
 			Imports: []importComparable{},
+			TopLevelIdentifiers: []string{
+				"Password",
+			},
+		},
+	},
+	{
+		desc: "multiple top level objects",
+		kt: `
+@JvmInline
+value class Password(private val s: String)
+
+interface Inter {}
+
+data class Point(val x: Int)
+
+fun Thing.method(): Int = 5
+
+fun fn(): Int = 5
+
+var pi = 3.14
+
+typealias AliasedInt = Int
+	`,
+		want: parseResultComparable{
+			File:    "simple.kt",
+			Package: "",
+			TopLevelIdentifiers: []string{
+				"AliasedInt",
+				"fn",
+				"Inter",
+				"method",
+				"Password",
+				"Point",
+				"pi",
+			},
 		},
 	},
 }
@@ -119,6 +158,7 @@ func TestTreesitterParser(t *testing.T) {
 		t.Run(tc.desc, func(t *testing.T) {
 			res, _ := NewParser().Parse(tc.want.File, tc.kt)
 
+			tc.want.sort()
 			if diff := cmp.Diff(tc.want, makeComparable(res), cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("unexpected diff (-want, +got):\n%s", diff)
 			}
@@ -153,10 +193,15 @@ fun main() {}
 }
 
 type parseResultComparable struct {
-	File    string
-	Imports []importComparable
-	Package string
-	HasMain bool
+	File                string
+	Imports             []importComparable
+	Package             string
+	HasMain             bool
+	TopLevelIdentifiers []string
+}
+
+func (pr *parseResultComparable) sort() {
+	sort.Strings(pr.TopLevelIdentifiers)
 }
 
 type importComparable struct {
@@ -170,7 +215,12 @@ func makeComparable(result *ParseResult) parseResultComparable {
 		File:    result.File,
 		Package: packageString(result),
 		HasMain: result.HasMain,
+		TopLevelIdentifiers: slices.Collect(
+			fn1.Map(slices.Values(result.TopLevelIdentifiers), func(i *SimpleIdentifier) string {
+				return i.Normalize().Literal()
+			})),
 	}
+	sort.Strings(comparable.TopLevelIdentifiers)
 	for _, imp := range result.Imports {
 		alias := ""
 		if imp.Alias() != nil {

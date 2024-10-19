@@ -52,7 +52,7 @@ func (kt *kotlinLang) Imports(c *config.Config, r *rule.Rule, f *rule.File) []re
 	}
 	var provides []resolve.ImportSpec
 
-	for _, pkg := range target.Packages {
+	for _, pkg := range target.IdentifierPrefixes {
 		provides = append(provides, resolve.ImportSpec{
 			Lang: LanguageName,
 			Imp:  pkg.Literal(),
