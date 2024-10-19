@@ -9,6 +9,7 @@ import (
 	sitter "github.com/smacker/go-tree-sitter"
 
 	treeutils "aspect.build/gazelle/gazelle/common/treesitter"
+	"aspect.build/gazelle/gazelle/common/treesitter/grammars/kotlin"
 )
 
 // ParseResult holds the result of parsing a Kotlin file.
@@ -32,6 +33,15 @@ type ParseResult struct {
 	//   details the identifier within the file corresponding to any
 	//   main functions that appear.
 	HasMain bool
+
+	// The identifiers of [top level objects] within a Kotlin source file.
+	//
+	// A top-level object is either a property declaration (var or val),
+	// a function declaration, a class declaration, a type alias, or an
+	// object declaration.
+	//
+	// [top level objects]: https://kotlinlang.org/spec/syntax-and-grammar.html#grammar-rule-topLevelObject
+	TopLevelIdentifiers []*SimpleIdentifier
 }
 
 // ImportStatement corresponds to a single [importHeader] in a Kotlin file.
@@ -53,7 +63,7 @@ type ImportStatement struct {
 	// The import alias, if the import contains an [importAlias], or nil if not.
 	//
 	// [importAlias]: https://kotlinlang.org/spec/syntax-and-grammar.html#grammar-rule-importAlias
-	alias *SimpleIdentiifer
+	alias *SimpleIdentifier
 }
 
 // Identifier returns the [Identifier] that corresponds to the identifier part
@@ -75,7 +85,7 @@ func (i *ImportStatement) IsStarImport() bool {
 // Alias returns the import alias, if the import contains an [importAlias], or nil if not.
 //
 // [importAlias]: https://kotlinlang.org/spec/syntax-and-grammar.html#grammar-rule-importAlias
-func (i *ImportStatement) Alias() *SimpleIdentiifer {
+func (i *ImportStatement) Alias() *SimpleIdentifier {
 	return i.alias
 }
 
@@ -99,7 +109,7 @@ func (i *ImportStatement) String() string {
 // [Kotlin identifier]:
 // https://kotlinlang.org/spec/syntax-and-grammar.html#grammar-rule-identifier
 type Identifier struct {
-	parts []*SimpleIdentiifer
+	parts []*SimpleIdentifier
 }
 
 // Parent returns this identifier with the last dot-delimited name component
@@ -114,7 +124,7 @@ func (i *Identifier) Parent() *Identifier {
 	return &Identifier{i.parts[0 : len(i.parts)-1]}
 }
 
-// Literal returns the form the the [SimpleIdentiifer] as it would appears in
+// Literal returns the form the the [SimpleIdentifier] as it would appears in
 // Kotlin source code.
 func (i *Identifier) Literal() string {
 	strs := []string{}
@@ -128,7 +138,7 @@ func (i *Identifier) Literal() string {
 //
 // For an identifier like "foo.bar.baz" an an argument like `NewSimpleIdentifier("zee")`,
 // returns an Identifer like "foo.bar.baz.zee".
-func (i *Identifier) Child(childComponent *SimpleIdentiifer) *Identifier {
+func (i *Identifier) Child(childComponent *SimpleIdentifier) *Identifier {
 	childId := &Identifier{}
 	childId.parts = append(childId.parts, i.parts...)
 	childId.parts = append(childId.parts, childComponent)
@@ -136,38 +146,38 @@ func (i *Identifier) Child(childComponent *SimpleIdentiifer) *Identifier {
 	return childId
 }
 
-// SimpleIdentiifer corresonds to the [simpleIdentifier] grammar rule in the Kotlin
+// SimpleIdentifier corresonds to the [simpleIdentifier] grammar rule in the Kotlin
 // language specificaiton. An [Identifier] is made up of dot-delimited
 // [SimpleIdentifier] instances.
 //
 // [simpleIdentifier]: https://kotlinlang.org/spec/syntax-and-grammar.html#grammar-rule-simpleIdentifier
-type SimpleIdentiifer struct {
+type SimpleIdentifier struct {
 	literal string
 }
 
-// NewSimpleIdentifier returns a [SimpleIdentiifer] from an identifier literal.
-func NewSimpleIdentifier(value string) (*SimpleIdentiifer, error) {
+// NewSimpleIdentifier returns a [SimpleIdentifier] from an identifier literal.
+func NewSimpleIdentifier(value string) (*SimpleIdentifier, error) {
 	if kotlinUnquotedIdentifierRegexp.MatchString(value) {
-		return &SimpleIdentiifer{value}, nil
+		return &SimpleIdentifier{value}, nil
 	}
 	return nil, fmt.Errorf("NewSimpleIdentifier only supports identifiers that match %s; %q doesn't match", kotlinUnquotedIdentifierRegexp, value)
 }
 
-// Literal returns the form the the [SimpleIdentiifer] as it would appears in
+// Literal returns the form the the [SimpleIdentifier] as it would appears in
 // Kotlin source code.
-func (si *SimpleIdentiifer) Literal() string {
+func (si *SimpleIdentifier) Literal() string {
 	return si.literal
 }
 
 // Normalize returns the version of the identifier without backticks if backticks are
 // included in the identifier unnecessarily.
-func (si *SimpleIdentiifer) Normalize() *SimpleIdentiifer {
+func (si *SimpleIdentifier) Normalize() *SimpleIdentifier {
 	if !strings.HasPrefix(si.literal, "`") {
 		return si
 	}
 	betweenQuoteMarks := si.literal[1 : len(si.literal)-1]
 	if kotlinUnquotedIdentifierRegexp.MatchString(betweenQuoteMarks) {
-		return &SimpleIdentiifer{betweenQuoteMarks}
+		return &SimpleIdentifier{betweenQuoteMarks}
 	}
 	return si
 }
@@ -209,39 +219,46 @@ func (p *treeSitterParser) Parse(filePath, source string) (*ParseResult, []error
 		errs = append(errs, err)
 	}
 
-	if tree != nil {
-		rootNode := tree.(treeutils.TreeAst).SitterTree.RootNode()
+	if tree == nil {
+		return result, errs
+	}
+	rootNode := tree.(treeutils.TreeAst).SitterTree.RootNode()
 
-		// Extract imports from the root nodes
-		for _, nodeI := range namedChildren(rootNode) {
-			if nodeI.Type() == "import_list" {
-				for j := 0; j < int(nodeI.NamedChildCount()); j++ {
-					nodeJ := nodeI.NamedChild(j)
-					if nodeJ.Type() == "import_header" {
-						result.Imports = append(result.Imports, must(readImportHeader(nodeJ, result, sourceCode)))
-					}
-				}
-			} else if nodeI.Type() == "package_header" {
-				if result.Package != nil {
-					// TODO - check if this error is even possible in a unit test.
-					errs = append(errs, fmt.Errorf("multiple package declarations found in %q", filePath))
-				} else {
-					result.Package = must(readIdentifier(
-						onlyNamedChildWithType(nodeI, sourceCode, "identifier"),
-						sourceCode, false))
-				}
-			} else if nodeI.Type() == "function_declaration" {
-				nodeJ := onlyNamedChildWithType(nodeI, sourceCode, "simple_identifier")
-				if nodeJ.Content(sourceCode) == "main" {
-					result.HasMain = true
+	topLevelIds, err := collectTopLevelIdentifiers(rootNode, sourceCode)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("error parsing top-level identifiers: %w", err))
+	}
+	result.TopLevelIdentifiers = topLevelIds
+
+	// Extract imports from the root nodes
+	for _, nodeI := range namedChildren(rootNode) {
+		if nodeI.Type() == "import_list" {
+			for j := 0; j < int(nodeI.NamedChildCount()); j++ {
+				nodeJ := nodeI.NamedChild(j)
+				if nodeJ.Type() == "import_header" {
+					result.Imports = append(result.Imports, must(readImportHeader(nodeJ, result, sourceCode)))
 				}
 			}
+		} else if nodeI.Type() == "package_header" {
+			if result.Package != nil {
+				// TODO - check if this error is even possible in a unit test.
+				errs = append(errs, fmt.Errorf("multiple package declarations found in %q", filePath))
+			} else {
+				result.Package = must(readIdentifier(
+					onlyNamedChildWithType(nodeI, sourceCode, "identifier"),
+					sourceCode, false))
+			}
+		} else if nodeI.Type() == "function_declaration" {
+			nodeJ := onlyNamedChildWithType(nodeI, sourceCode, "simple_identifier")
+			if nodeJ.Content(sourceCode) == "main" {
+				result.HasMain = true
+			}
 		}
+	}
 
-		treeErrors := tree.QueryErrors()
-		if treeErrors != nil {
-			errs = append(errs, treeErrors...)
-		}
+	treeErrors := tree.QueryErrors()
+	if treeErrors != nil {
+		errs = append(errs, treeErrors...)
 	}
 
 	return result, errs
@@ -306,7 +323,7 @@ func readImportHeader(importHeaderNode *sitter.Node, result *ParseResult, source
 	}
 
 	isStar := false
-	var alias *SimpleIdentiifer
+	var alias *SimpleIdentifier
 
 	/*
 		Structure of import_header for "import x.y.z.*":
@@ -322,7 +339,7 @@ func readImportHeader(importHeaderNode *sitter.Node, result *ParseResult, source
 		import_header/2:.*: Named=false; Symbol: 11; Content: ".*"
 	*/
 	if aliasNode := optionalOnlyChildWithType(importHeaderNode, sourceCode, "import_alias"); aliasNode != nil {
-		alias = (&SimpleIdentiifer{onlyNamedChildWithType(aliasNode, sourceCode, "type_identifier").Content(sourceCode)}).Normalize()
+		alias = (&SimpleIdentifier{onlyNamedChildWithType(aliasNode, sourceCode, "type_identifier").Content(sourceCode)}).Normalize()
 	} else if
 	/*
 		Structure of import_header for import com.example.foo.Bar as MyBar
@@ -356,7 +373,7 @@ func readIdentifier(node *sitter.Node, sourceCode []byte, ignoreLast bool) (*Ide
 		return nil, fmt.Errorf("readIdentifier must be passed an 'identifier' treesitter Node, got node type %q: %s", node.Type(), node.Content(sourceCode))
 	}
 
-	var parts []*SimpleIdentiifer
+	var parts []*SimpleIdentifier
 
 	var s strings.Builder
 
@@ -384,11 +401,11 @@ func readIdentifier(node *sitter.Node, sourceCode []byte, ignoreLast bool) (*Ide
 	return &Identifier{parts}, nil
 }
 
-func readSimpleIdentifier(node *sitter.Node, sourceCode []byte) *SimpleIdentiifer {
+func readSimpleIdentifier(node *sitter.Node, sourceCode []byte) *SimpleIdentifier {
 	if node.Type() != "simple_identifier" {
 		panic(fmt.Errorf("readIdentifier must be passed an 'simple_identifier' treesitter Node, got node type %q: %s", node.Type(), node.Content(sourceCode)))
 	}
-	return (&SimpleIdentiifer{node.Content(sourceCode)}).Normalize()
+	return (&SimpleIdentifier{node.Content(sourceCode)}).Normalize()
 }
 
 func must[T any](obj T, err error) T {
@@ -458,4 +475,106 @@ func filter[T any](slice []T, f func(T) bool) []T {
 		}
 	}
 	return result
+}
+
+func collectTopLevelIdentifiers(rootNode *sitter.Node, sourceCode []byte) ([]*SimpleIdentifier, error) {
+	topLevelIdentifiers := []*SimpleIdentifier{}
+
+	for m := range matches(topLevelIdentifierQuery, rootNode) {
+		id, err := NewSimpleIdentifier(m.Captures[0].Node.Content(sourceCode))
+		if err != nil {
+			return nil, err
+		}
+		topLevelIdentifiers = append(topLevelIdentifiers, id)
+	}
+
+	return topLevelIdentifiers, nil
+}
+
+func collectParseErrors(rootNode *sitter.Node, sourceCode []byte) []string {
+	var errs []string
+	for m := range matches(errQuery, rootNode) {
+		at := m.Captures[0].Node
+		atStart := at.StartPoint()
+		show := at
+
+		// Navigate up the AST to include the full source line
+		if atStart.Column > 0 {
+			for show.StartPoint().Row > 0 && show.StartPoint().Row == atStart.Row {
+				show = show.Parent()
+			}
+		}
+
+		// Extract only that line from the parent Node
+		lineI := int(atStart.Row - show.StartPoint().Row)
+		colI := int(atStart.Column)
+		line := strings.Split(show.Content(sourceCode), "\n")[lineI]
+
+		pre := fmt.Sprintf("     %d: ", atStart.Row+1)
+		msg := pre + line
+		arw := strings.Repeat(" ", len(pre)+colI) + "^"
+
+		errs = append(errs, fmt.Sprintf(msg+"\n"+arw))
+	}
+	return errs
+}
+
+// Queries created with the help of running
+// ./node_modules/.bin/tree-sitter build-wasm and
+// ./node_modules/.bin/tree-sitter playground
+var (
+	errQuery = mustNewQuery("(ERROR) @error")
+
+	packageIdentifierQuery = mustNewQuery(`
+(source_file
+	(package_header (identifier (simple_identifier) @id)))
+`)
+
+	// https://kotlinlang.org/spec/syntax-and-grammar.html#grammar-rule-topLevelObject
+	topLevelIdentifierQuery = mustNewQuery(`
+	(source_file
+		(property_declaration
+			(variable_declaration) @topLevelIdentifier))
+
+	(source_file
+		(function_declaration
+			(simple_identifier) @functionId))
+
+	(source_file
+		(class_declaration
+			(type_identifier) @classId))
+
+	(source_file
+		(type_alias
+			(type_identifier) @typeId))
+
+		 (source_file
+			(object_declaration
+				(type_identifier) @typeId))
+	`)
+)
+
+func mustNewQuery(query string) *sitter.Query {
+	q, err := sitter.NewQuery([]byte(query), kotlin.GetLanguage())
+	if err != nil {
+		panic(err)
+	}
+	return q
+}
+
+func matches(query *sitter.Query, node *sitter.Node) iter.Seq[*sitter.QueryMatch] {
+	return func(yield func(*sitter.QueryMatch) bool) {
+		qc := sitter.NewQueryCursor()
+		defer qc.Close()
+		qc.Exec(query, node)
+		for {
+			m, ok := qc.NextMatch()
+			if !ok {
+				break
+			}
+			if !yield(m) {
+				break
+			}
+		}
+	}
 }

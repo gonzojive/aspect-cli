@@ -7,6 +7,7 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//gazelle/common/treesitter",
+        "//gazelle/common/treesitter/grammars/kotlin",
         "@com_github_smacker_go_tree_sitter//:go-tree-sitter",
     ],
 )
@@ -17,6 +18,7 @@ go_test(
     srcs = ["parser_test.go"],
     embed = [":parser"],
     deps = [
+        "//gazelle/common/fn1",
         "@com_github_google_go_cmp//cmp",
         "@com_github_google_go_cmp//cmp/cmpopts",
     ],
